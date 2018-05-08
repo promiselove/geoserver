@@ -16,6 +16,7 @@ import org.geoserver.config.GeoServerInfo;
 import org.geoserver.data.test.CiteTestData;
 import org.geoserver.data.test.SystemTestData;
 import org.geoserver.data.test.TestData;
+import org.geoserver.platform.Service;
 import org.geoserver.wfs.GMLInfo;
 import org.geoserver.wfs.StoredQuery;
 import org.geoserver.wfs.WFSException;
@@ -806,6 +807,20 @@ public class TransactionTest extends WFS20TestSupport {
                "&cql_filter=FID+EQ+'1234'");
        XMLAssert.assertXpathExists("//cite:RoadSegments/cite:FID[text() = '1234']", dom);
    }
+   
+   @Test
+   public void testReplaceOnTransactionalLevel() throws Exception {
+       GeoServer gs = getGeoServer();
+       WFSInfo wfs = gs.getService(WFSInfo.class);
+       wfs.setServiceLevel(WFSInfo.ServiceLevel.TRANSACTIONAL);
+       gs.save(wfs);
+       try {
+           testReplace();
+       } finally {
+           wfs.setServiceLevel(WFSInfo.ServiceLevel.COMPLETE);
+           gs.save(wfs);
+       }
+   }
 
     @Test
     public void testSOAP() throws Exception {
@@ -933,7 +948,17 @@ public class TransactionTest extends WFS20TestSupport {
     
     @Test
     public void testInsertUnknownFeatureType() throws Exception {
-        // perform an insert on an invalid feature type
+        // perform an insert on an invalid feature type on a global service
+        testInsertUnkonwnFeatureType("wfs");
+    }
+
+    @Test
+    public void testInsertUnknownFeatureTypeWorkspaceSpecific() throws Exception {
+        // perform an insert on an invalid feature type on a workspace specific service
+        testInsertUnkonwnFeatureType("cgf/wfs");
+    }
+
+    public void testInsertUnkonwnFeatureType(String path) throws Exception {
         String insert =
                 "<wfs:Transaction service='WFS' version='2.0.0' "
                         + "xmlns:cgf=\"http://www.opengis.net/cite/geometry\" "
@@ -952,12 +977,13 @@ public class TransactionTest extends WFS20TestSupport {
                         + "</wfs:Insert>"
                         + "</wfs:Transaction>";
 
-        MockHttpServletResponse response = postAsServletResponse("wfs", insert);
+
+        MockHttpServletResponse response = postAsServletResponse(path, insert);
         assertEquals(400, response.getStatus());
         Document dom = dom(new ByteArrayInputStream(response.getContentAsByteArray()));
         checkOws11Exception(dom, "2.0.0", "InvalidValue", "Transaction");
     }
-    
+
     @Test
     public void testUpdateBoundedByWithKML() throws Exception {
         GeoServer gs = getGeoServer();

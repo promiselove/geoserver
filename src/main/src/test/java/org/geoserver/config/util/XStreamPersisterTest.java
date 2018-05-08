@@ -5,10 +5,12 @@
  */
 package org.geoserver.config.util;
 
+import static org.hamcrest.Matchers.hasEntry;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -16,6 +18,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,7 +27,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.measure.unit.SI;
+import org.custommonkey.xmlunit.XMLUnit;
+import org.geoserver.config.SettingsInfo;
+import org.hamcrest.CoreMatchers;
+import org.hamcrest.Matchers;
+import si.uom.SI;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.OutputKeys;
@@ -647,7 +654,7 @@ public class XStreamPersisterTest {
         ft.setAbstract( "abstract");
         ft.setSRS( "EPSG:4326");
         ft.setNativeCRS( CRS.decode( "EPSG:4326") );
-        ft.setLinearizationTolerance(new Measure(10, SI.METER));
+        ft.setLinearizationTolerance(new Measure(10, SI.METRE));
         
         ByteArrayOutputStream out = out();
         persister.save( ft, out );
@@ -660,7 +667,7 @@ public class XStreamPersisterTest {
         assertEquals( ds, ft.getStore() );
         assertEquals( ns, ft.getNamespace() );
         assertEquals( "EPSG:4326", ft.getSRS() );
-        assertEquals( new Measure(10, SI.METER), ft.getLinearizationTolerance() );
+        assertEquals( new Measure(10, SI.METRE), ft.getLinearizationTolerance() );
         assertTrue( CRS.equalsIgnoreMetadata( CRS.decode( "EPSG:4326"), ft.getNativeCRS() ) ); 
     }
     
@@ -1322,6 +1329,83 @@ public class XStreamPersisterTest {
         assertNotNull( cv.getCRS() );
         assertNotNull( cv.getGrid().getGridToCRS() );
         assertEquals( cv.getGrid().getGridRange().getLow(0), 0);
+    }
+    
+    @Test
+    public void readSettingsMetadataInvalidEntry() throws Exception {
+        String xml = "<global>\n" +
+                "  <settings>\n" +
+                "    <metadata>\n" +
+                "      <map>\n" +
+                "        <entry>\n" +
+                "            <string>key1</string>\n" +
+                "            <string>value1</string>\n" +                
+                "        </entry>\n" +
+                "        <entry>\n" +
+                "          <string>NetCDFOutput.Key</string>\n" +
+                "          <netCDFSettings>\n" +
+                "            <compressionLevel>0</compressionLevel>\n" +
+                "            <shuffle>true</shuffle>\n" +
+                "            <copyAttributes>false</copyAttributes>\n" +
+                "            <copyGlobalAttributes>false</copyGlobalAttributes>\n" +
+                "            <dataPacking>NONE</dataPacking>\n" +
+                "          </netCDFSettings>\n" +
+                "        </entry>\n" +
+                "        <entry>\n" +
+                "            <string>key2</string>\n" +
+                "            <string>value2</string>\n" +
+                "        </entry>\n" +
+                "      </map>\n" +
+                "    </metadata>\n" +
+                "    <localWorkspaceIncludesPrefix>true</localWorkspaceIncludesPrefix>\n" +
+                "  </settings>\n" +
+                "</global>\n";
+        GeoServerInfo gs = persister.load(new ByteArrayInputStream(xml.getBytes()), 
+                GeoServerInfo.class);
+        SettingsInfo settings = gs.getSettings();
+        MetadataMap metadata = settings.getMetadata();
+        assertEquals(2, metadata.size());
+        assertThat(metadata, hasEntry("key1", "value1"));
+        assertThat(metadata, hasEntry("key2", "value2"));
+        assertTrue(settings.isLocalWorkspaceIncludesPrefix());
+        
+        // check it round trips the same way it came in, minus the bit we could not read
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        persister.save(gs, bos);
+        // System.out.println(new String(bos.toByteArray()));
+        Document doc = dom(new ByteArrayInputStream(bos.toByteArray()));
+        XMLAssert.assertXpathExists("//settings/metadata/map", doc);
+        XMLAssert.assertXpathEvaluatesTo("2", "count(//settings/metadata/map/entry)", doc);
+        XMLAssert.assertXpathEvaluatesTo("key1", "//settings/metadata/map/entry[1]/string[1]", doc);
+        XMLAssert.assertXpathEvaluatesTo("value1", "//settings/metadata/map/entry[1]/string[2]", doc);
+        XMLAssert.assertXpathEvaluatesTo("key2", "//settings/metadata/map/entry[2]/string[1]", doc);
+        XMLAssert.assertXpathEvaluatesTo("value2", "//settings/metadata/map/entry[2]/string[2]", doc);
+    }
+    
+    @Test
+    public void readCoverageMetadataInvalidEntry()  throws Exception {
+        String xml = "<coverage>\n" +
+                "  <metadata>\n" +
+                "    <entry key=\"key1\">value1</entry>\n" +
+                "    <entry key=\"netcdf\">\n" +
+                "      <netCDFSettings>\n" +
+                "            <compressionLevel>0</compressionLevel>\n" +
+                "            <shuffle>true</shuffle>\n" +
+                "            <copyAttributes>false</copyAttributes>\n" +
+                "            <copyGlobalAttributes>false</copyGlobalAttributes>\n" +
+                "            <dataPacking>NONE</dataPacking>\n" +
+                "      </netCDFSettings>\n" +
+                "    </entry>\n" +
+                "    <entry key=\"key2\">value2</entry>\n" +
+                "  </metadata>\n" +
+                "</coverage>";
+        CoverageInfo ci = persister.load(new ByteArrayInputStream(xml.getBytes()),
+                CoverageInfo.class);
+        MetadataMap metadata = ci.getMetadata();
+        assertEquals(3, metadata.size());
+        assertThat(metadata, hasEntry("key1", "value1"));
+        assertThat(metadata, hasEntry("key2", "value2"));
+        assertThat(metadata, hasEntry("netcdf", null));
     }
 
 
